@@ -270,6 +270,15 @@ class ABBIRB120MoveItEnv(robot_BasicEnv.RobotBasicEnv):
         """
         result = self.move_abb_object.is_goal_reachable(goal)
         return result
+
+    def check_pose(self, goal_pos, goal_ori):
+        """
+        Check if the goal is reachable
+        * goal_pos is a list with 3 elements, XYZ positions of the EE
+        * goal_ori is a list with 4 elements, XYZW orientation of the EE
+        """
+        result = self.move_abb_object.is_pose_reachable(goal_pos, goal_ori)
+        return result
     
     def get_randomJointVals(self):
         return self.move_abb_object.group.get_random_joint_values()
@@ -369,3 +378,28 @@ class MoveABB(object):
         self.group.clear_pose_targets()
 
         return result
+
+    def is_pose_reachable(self, position, orientation):
+        """
+        Check if the goal is reachable
+        * position is the desired XYZ of the EE 
+        * orientation is the desired quaternion in XYZW of the EE
+        """
+
+        pose_goal = Pose()
+        pose_goal.position.x = float(position[0])
+        pose_goal.position.y = float(position[1])
+        pose_goal.position.z = float(position[2])
+
+        pose_goal.orientation.x = float(orientation[0])
+        pose_goal.orientation.y = float(orientation[1])
+        pose_goal.orientation.z = float(orientation[2])
+        pose_goal.orientation.w = float(orientation[3])
+
+        self.group.set_pose_target(pose_goal)
+        plan = self.group.plan()        
+        result = plan[0]
+        self.group.clear_pose_targets()
+
+        return result
+
