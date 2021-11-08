@@ -15,7 +15,8 @@ from abb_irb120_reacher.robot_env import abb_irb120_moveit
 import rospy
 import rostopic
 import tf
-from tf.transformations import quaternion_from_euler, euler_from_quaternion, quaternion_matrix, quaternion_from_matrix
+from tf.transformations import quaternion_from_euler, euler_from_quaternion, quaternion_matrix, quaternion_from_matrix, rotation_from_matrix
+from angles import normalize_angle
 
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point
@@ -238,7 +239,7 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
         vec_EE_GOAL_pos = vec_EE_GOAL_pos / np.linalg.norm(vec_EE_GOAL_pos)
 
         #--- Orientation error vector
-        vec_EE_GOAL_ori = self.calc_ori_error(current_goal_ori, self.ee_ori)
+        vec_EE_GOAL_ori = self.calc_ori_error_2(current_goal_ori, self.ee_ori) # TODO Check both error function
 
         obs = np.concatenate((
             self.joint_values,       # Current joint angles
@@ -306,7 +307,7 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
                 reward   += -self.mult_dist_reward*dist2goal 
 
             #- Orientation error reward
-            ori_error = np.linalg.norm(self.calc_ori_error(current_goal_ori, current_ori))
+            ori_error = self.calc_ori_error_angle(current_goal_ori, current_ori)
             rospy.loginfo("Ori error: " + str(ori_error))
             # if ori_error<=self.tol_goal_ori:
             #     reward   += self.reached_goal_reward/2.0
@@ -425,7 +426,7 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
 
         # check if the end-effector located within a threshold to the goal
         distance_2_goal   = scipy.spatial.distance.euclidean(current_pos, goal_pos)
-        orientation_error = np.linalg.norm(self.calc_ori_error(goal_ori, current_ori))
+        orientation_error = self.calc_ori_error_angle(goal_ori, current_ori)
 
         if distance_2_goal<=self.tol_goal_pos and orientation_error<=self.tol_goal_ori:
             done = True
@@ -452,7 +453,7 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
 
     def calc_ori_error(self, goal_ori, current_ori):
         """
-        Calculate the orientation error Caccavale 
+        Calculate the orientation error Caccavale Quaternion
         """
         Rot_matrix_current = quaternion_matrix(current_ori)
         Rot_matrix_goal    = quaternion_matrix(goal_ori)
@@ -463,20 +464,54 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
 
         ori_error = 2.0 * quat_error[3] * np.array([quat_error[0], quat_error[1], quat_error[2]])
 
+        ori_error = ori_error / np.linalg.norm(ori_error)
+
         return ori_error
 
 
     def calc_ori_error_2(self, goal_ori, current_ori):
         """
         Calculate the orientation error
-                error = goal.w*ee[x,y,z] - ee.w*goal[x,y,z] - skew(goal[x,y,z])*ee[x,y,z]
+                error = current.w*goal[x,y,z] - goal.w*current[x,y,z] - skew(goal[x,y,z])*current[x,y,z]
         """
-        skew_sym_matrix_goal = np.array([[0, -goal_ori[2], goal_ori[1]],
-                                        [goal_ori[2], 0, -goal_ori[0]],
-                                        [-goal_ori[1], goal_ori[0], 0]])
-        ori_error = goal_ori[3]*current_ori[0:3] - current_ori[3]*goal_ori[0:3] - np.matmul(skew_sym_matrix_goal, current_ori[0:3])
+        skew_sym_matrix_goal = np.array([[   0,        -goal_ori[2], goal_ori[1]],
+                                        [goal_ori[2],       0,      -goal_ori[0]],
+                                        [-goal_ori[1],  goal_ori[0],      0]])
+
+        ori_error = current_ori[3]*goal_ori[0:3] - goal_ori[3]*current_ori[0:3] - np.matmul(skew_sym_matrix_goal, current_ori[0:3])
+        # ori_error = goal_ori[3]*current_ori[0:3] - current_ori[3]*goal_ori[0:3] - np.matmul(skew_sym_matrix_goal, current_ori[0:3])
+
+        ori_error = ori_error / np.linalg.norm(ori_error)
         
         return ori_error
+
+    def calc_ori_error_angle(self, goal_ori, current_ori):
+        """
+        Calculate angle from one rotation to another
+        """
+
+        q_delta = current_ori[3]*goal_ori[3] + current_ori[0]*goal_ori[0] + current_ori[1]*goal_ori[1] + current_ori[2]*goal_ori[2] 
+        x_delta = current_ori[3]*goal_ori[0] - current_ori[0]*goal_ori[3] + current_ori[1]*goal_ori[2] - current_ori[2]*goal_ori[1]
+        y_delta = current_ori[3]*goal_ori[1] - current_ori[1]*goal_ori[3] + current_ori[2]*goal_ori[0] - current_ori[0]*goal_ori[2]
+        z_delta = current_ori[3]*goal_ori[2] - current_ori[2]*goal_ori[3] + current_ori[0]*goal_ori[1] - current_ori[1]*goal_ori[0]
+
+        direc2 = np.array([x_delta, y_delta, z_delta])
+
+        angle_error   = 2.0 * np.arctan2(np.linalg.norm(direc2), q_delta)
+        angle_error = normalize_angle(angle_error)
+        angle_error = np.abs(angle_error)
+
+        #-- Using Rotation matrices
+        # Rot_matrix_current = quaternion_matrix(current_ori)
+        # Rot_matrix_goal    = quaternion_matrix(goal_ori)
+
+        # Rot_matrix_error   = np.matmul(Rot_matrix_goal, np.transpose(Rot_matrix_current))
+
+        # angle_error, direc, point = rotation_from_matrix(Rot_matrix_error)
+        # angle_error = np.abs(angle_error)
+
+        return angle_error
+
 
     def get_randomValidGoal(self):
         is_valid = False
