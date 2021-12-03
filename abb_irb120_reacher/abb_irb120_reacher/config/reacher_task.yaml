@@ -79,7 +79,7 @@ irb120: #namespace
     #--- Set variables related to rewards
     
     step_reward: -1.0 # 0.01
-    multiplier_dist_reward: 50.0 # 10.0
+    multiplier_dist_reward: 100.0
     multiplier_ori_reward:  1.0
     reached_goal_reward:  100.0 # 10.0
     joint_limits_reward: -1000.0 # - 50.0

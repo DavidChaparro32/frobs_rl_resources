@@ -198,6 +198,17 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
         if not result:
             rospy.logwarn("Initialisation is failed....")
 
+        #--- Get initial position and orientation error
+        ee_pose = self.get_ee_pose() # Get a geometry_msgs/PoseStamped msg
+
+        self.ee_pos = np.array([ee_pose.pose.position.x, ee_pose.pose.position.y, ee_pose.pose.position.z])
+        self.ee_ori = np.array([ee_pose.pose.orientation.x, ee_pose.pose.orientation.y, ee_pose.pose.orientation.z, ee_pose.pose.orientation.w])
+
+        self.prev_pos_error = scipy.spatial.distance.euclidean(self.goal_pos, self.ee_pos)
+        self.prev_ori_error = self.calc_ori_error_angle(self.goal_ori, self.ee_ori)
+
+        rospy.logwarn("End episode initialization")
+
     def _send_action(self, action):
         """
         The action are the joint positions
@@ -239,7 +250,7 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
         vec_EE_GOAL_pos = vec_EE_GOAL_pos / np.linalg.norm(vec_EE_GOAL_pos)
 
         #--- Orientation error vector
-        vec_EE_GOAL_ori = self.calc_ori_error_2(current_goal_ori, self.ee_ori) # TODO Check both error function
+        vec_EE_GOAL_ori = self.calc_ori_error(current_goal_ori, self.ee_ori) # TODO Check both error function
 
         obs = np.concatenate((
             self.joint_values,       # Current joint angles
@@ -299,20 +310,27 @@ class ABBIRB120ReacherEnv(abb_irb120_moveit.ABBIRB120MoveItEnv):
             self.goal_marker.lifetime = rospy.Duration(secs=5)
 
             #- Distance from EE to Goal reward
-            dist2goal = scipy.spatial.distance.euclidean(current_pos, current_goal_pos)
-            rospy.loginfo("Pos error: " + str(dist2goal))
-            if dist2goal<=self.tol_goal_pos:
+            pos_error = scipy.spatial.distance.euclidean(current_pos, current_goal_pos)
+            rospy.loginfo("Pos error: " + str(pos_error))
+            if pos_error<=self.tol_goal_pos:
                 reward   += self.reached_goal_reward/2.0
             else:
-                reward   += -self.mult_dist_reward*dist2goal 
+                rospy.loginfo("Final Pos error: " + str(-self.mult_dist_reward*pos_error))
+                reward   += -self.mult_dist_reward*pos_error
 
             #- Orientation error reward
             ori_error = self.calc_ori_error_angle(current_goal_ori, current_ori)
             rospy.loginfo("Ori error: " + str(ori_error))
+            
             # if ori_error<=self.tol_goal_ori:
             #     reward   += self.reached_goal_reward/2.0
             # else:
-            reward   += -self.mult_ori_reward*ori_error 
+
+            rospy.loginfo("Final Ori error: " + str(-self.mult_ori_reward*ori_error))
+            reward   += -self.mult_ori_reward*ori_error
+
+            self.prev_pos_error = pos_error
+            self.prev_ori_error = ori_error
 
             #- Constant reward
             reward += self.step_reward
